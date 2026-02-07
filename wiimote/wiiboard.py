@@ -17,7 +17,7 @@ from .wiimote import Wiimote, WiimoteState, ReportMode
 class CalibrationData:
     """Calibration data for Wii Balance Board sensors"""
 
-    sensor_0kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 0kg
+    sensor_0kg: Tuple[int, int, int, int]   # TR, BR, TL, BL at 0kg
     sensor_17kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 17kg
     sensor_34kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 34kg
     reference_temperature: int  # Reference temperature for compensation
@@ -416,7 +416,6 @@ class WiiBoard(Wiimote):
 
     def _handle_report(self, data: bytes) -> None:
         """Handle incoming report from Balance Board"""
-        print("report", data.hex(" ", 1))
         report = reports.parse_report(data)
 
         if report is None:
@@ -424,7 +423,6 @@ class WiiBoard(Wiimote):
 
         # Handle ReadMemoryReport for calibration data
         if isinstance(report, reports.ReadMemoryReport):
-            print("memory read report", report)
             self._handle_read_memory_report(report)
             return
 
