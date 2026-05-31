@@ -2,24 +2,9 @@
 # Self-contained module for Wii Balance Board and Wiimote devices
 
 from .reports import Buttons
-from .wiimote import (
-    Wiimote,
-    WiimoteState,
-    ReportMode,
-)
-from .wiiboard import (
-    WiiBoard,
-    BalanceBoardState,
-    CalibrationData,
-)
-from .transport import (
-    create_transport,
-    discover_devices,
-    pair_device,
-    BluetoothConnection,
-    L2CAPChannel,
-    BluetoothTransport,
-)
+from .transport import BluetoothConnection, L2CAPChannel, create_transport
+from .wiiboard import BalanceBoardState, CalibrationData, WiiBoard
+from .wiimote import ReportMode, Wiimote, WiimoteState
 
 __all__ = [
     "Buttons",
@@ -31,9 +16,6 @@ __all__ = [
     "CalibrationData",
     # Transport layer
     "create_transport",
-    "discover_devices",
-    "pair_device",
     "BluetoothConnection",
     "L2CAPChannel",
-    "BluetoothTransport",
 ]

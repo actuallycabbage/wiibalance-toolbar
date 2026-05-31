@@ -1,21 +1,13 @@
 # Bluetooth Transport Layer
 # Exports interfaces and default Bumble implementation
 
-from .interfaces import (
-    PSM,
-    L2CAPChannel,
-    BluetoothConnection,
-    BluetoothTransport,
-)
-
 from .bumble import (
-    BumbleL2CAPChannel,
     BumbleBluetoothConnection,
     BumbleBluetoothTransport,
+    BumbleL2CAPChannel,
     create_transport,
-    discover_devices,
-    pair_device,
 )
+from .interfaces import PSM, BluetoothConnection, L2CAPChannel
 
 # Export the Bumble implementation as the default
 __all__ = [
@@ -23,12 +15,9 @@ __all__ = [
     "PSM",
     "L2CAPChannel",
     "BluetoothConnection",
-    "BluetoothTransport",
     # Bumble implementation
     "BumbleL2CAPChannel",
     "BumbleBluetoothConnection",
     "BumbleBluetoothTransport",
     "create_transport",
-    "discover_devices",
-    "pair_device",
 ]

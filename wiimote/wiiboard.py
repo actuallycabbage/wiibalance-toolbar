@@ -7,17 +7,17 @@ import asyncio
 import struct
 import zlib
 from dataclasses import dataclass, field
-from typing import Optional, Callable, Tuple
+from typing import Callable, Optional, Tuple
 
 from . import reports
-from .wiimote import Wiimote, WiimoteState, ReportMode
+from .wiimote import ReportMode, Wiimote, WiimoteState
 
 
 @dataclass
 class CalibrationData:
     """Calibration data for Wii Balance Board sensors"""
 
-    sensor_0kg: Tuple[int, int, int, int]   # TR, BR, TL, BL at 0kg
+    sensor_0kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 0kg
     sensor_17kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 17kg
     sensor_34kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 34kg
     reference_temperature: int  # Reference temperature for compensation
@@ -107,7 +107,7 @@ class WiiBoard(Wiimote):
 
     @property
     def calibration(self) -> Optional[CalibrationData]:
-        """Get calibration data (read-only)"""
+        """Get calibration data"""
         return self._calibration
 
     @property
@@ -513,24 +513,24 @@ class WiiBoard(Wiimote):
                 stored_crc = struct.unpack(">I", cal_data[28:32])[0]
 
                 # Verify and report
-                if calculated_crc == stored_crc:
-                    print(f"Calibration data verified!")
-                    print(f"  Temperature: {data[0]}")
-                    print(f"  Battery: {self._calibration.reference_battery}")
-                    print(
-                        f"  0kg: TR={self._calibration.sensor_0kg[0]}, BR={self._calibration.sensor_0kg[1]}, TL={self._calibration.sensor_0kg[2]}, BL={self._calibration.sensor_0kg[3]}"
-                    )
-                    print(
-                        f"  17kg: TR={self._calibration.sensor_17kg[0]}, BR={self._calibration.sensor_17kg[1]}, TL={self._calibration.sensor_17kg[2]}, BL={self._calibration.sensor_17kg[3]}"
-                    )
-                    print(
-                        f"  34kg: TR={self._calibration.sensor_34kg[0]}, BR={self._calibration.sensor_34kg[1]}, TL={self._calibration.sensor_34kg[2]}, BL={self._calibration.sensor_34kg[3]}"
-                    )
-                else:
-                    print(f"Warning: Calibration data checksum verification failed")
-                    print(
-                        f"  Calculated: 0x{calculated_crc:08x}, Stored: 0x{stored_crc:08x}"
-                    )
+                # if calculated_crc == stored_crc:
+                #     print(f"Calibration data verified!")
+                #     print(f"  Temperature: {data[0]}")
+                #     print(f"  Battery: {self._calibration.reference_battery}")
+                #     print(
+                #         f"  0kg: TR={self._calibration.sensor_0kg[0]}, BR={self._calibration.sensor_0kg[1]}, TL={self._calibration.sensor_0kg[2]}, BL={self._calibration.sensor_0kg[3]}"
+                #     )
+                #     print(
+                #         f"  17kg: TR={self._calibration.sensor_17kg[0]}, BR={self._calibration.sensor_17kg[1]}, TL={self._calibration.sensor_17kg[2]}, BL={self._calibration.sensor_17kg[3]}"
+                #     )
+                #     print(
+                #         f"  34kg: TR={self._calibration.sensor_34kg[0]}, BR={self._calibration.sensor_34kg[1]}, TL={self._calibration.sensor_34kg[2]}, BL={self._calibration.sensor_34kg[3]}"
+                #     )
+                # else:
+                #     print(f"Warning: Calibration data checksum verification failed")
+                #     print(
+                #         f"  Calculated: 0x{calculated_crc:08x}, Stored: 0x{stored_crc:08x}"
+                #     )
 
                 delattr(self, "_cal_data_for_checksum")
 

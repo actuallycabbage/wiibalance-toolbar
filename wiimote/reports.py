@@ -13,8 +13,8 @@ from typing import Optional
 # ==============================================================================
 
 # HID headers
-HID_INPUT = 0xa1
-HID_OUTPUT = 0xa2
+HID_INPUT = 0xA1
+HID_OUTPUT = 0xA2
 
 # Input Report IDs
 WM_RPT_STATUS = 0x20
@@ -50,6 +50,7 @@ WM_CMD_IR_ENABLE_2 = 0x1A
 # Utilities
 # ==============================================================================
 
+
 def u16be(b: bytes, off: int = 0) -> int:
     """Read big-endian 16-bit unsigned int"""
     return struct.unpack_from(">H", b, off)[0]
@@ -64,23 +65,25 @@ def _apply_rumble(byte: int, rumble: bool) -> int:
 # Button Flags
 # ==============================================================================
 
+
 class Buttons(IntFlag):
     """Wiimote button flags"""
-    TWO   = 0x0001
-    ONE   = 0x0002
-    B     = 0x0004
-    A     = 0x0008
+
+    TWO = 0x0001
+    ONE = 0x0002
+    B = 0x0004
+    A = 0x0008
     MINUS = 0x0010
-    HOME  = 0x0080
-    LEFT  = 0x0100
+    HOME = 0x0080
+    LEFT = 0x0100
     RIGHT = 0x0200
-    DOWN  = 0x0400
-    UP    = 0x0800
-    PLUS  = 0x1000
+    DOWN = 0x0400
+    UP = 0x0800
+    PLUS = 0x1000
 
     # Helper methods for checking button states
 
-    def is_pressed(self, button: 'Buttons') -> bool:
+    def is_pressed(self, button: "Buttons") -> bool:
         """Check if a specific button is pressed"""
         return bool(self & button)
 
@@ -139,7 +142,7 @@ class Buttons(IntFlag):
         """Check if D-Pad RIGHT is pressed"""
         return bool(self & Buttons.RIGHT)
 
-    def get_pressed(self) -> set['Buttons']:
+    def get_pressed(self) -> set["Buttons"]:
         """
         Get a set of all currently pressed buttons.
 
@@ -165,9 +168,11 @@ class Buttons(IntFlag):
 # Input Report Dataclasses
 # ==============================================================================
 
+
 @dataclass(frozen=True)
 class StatusReport:
     """Report 0x20 - Status Information"""
+
     buttons: Buttons
     battery_low: bool
     extension_connected: bool
@@ -183,6 +188,7 @@ class StatusReport:
 @dataclass(frozen=True)
 class ReadMemoryReport:
     """Report 0x21 - Read Memory Data"""
+
     buttons: Buttons
     size: int  # Size of data (1-16)
     error: bool
@@ -193,6 +199,7 @@ class ReadMemoryReport:
 @dataclass(frozen=True)
 class AckReport:
     """Report 0x22 - Acknowledge Output Report"""
+
     buttons: Buttons
     report_id: int  # The output report being acknowledged
     error_code: int  # 0=success, 3=error, 4/5/8=unknown
@@ -201,12 +208,14 @@ class AckReport:
 @dataclass(frozen=True)
 class ButtonReport:
     """Report 0x30 - Core Buttons Only"""
+
     buttons: Buttons
 
 
 @dataclass(frozen=True)
 class ButtonAccelReport:
     """Report 0x31 - Buttons + Accelerometer"""
+
     buttons: Buttons
     accel_x: int
     accel_y: int
@@ -216,6 +225,7 @@ class ButtonAccelReport:
 @dataclass(frozen=True)
 class ButtonExt8Report:
     """Report 0x32 - Buttons + 8 Extension bytes"""
+
     buttons: Buttons
     extension: bytes
 
@@ -223,6 +233,7 @@ class ButtonExt8Report:
 @dataclass(frozen=True)
 class ButtonAccelIR12Report:
     """Report 0x33 - Buttons + Accelerometer + 12 IR bytes"""
+
     buttons: Buttons
     accel_x: int
     accel_y: int
@@ -233,6 +244,7 @@ class ButtonAccelIR12Report:
 @dataclass(frozen=True)
 class ButtonExt19Report:
     """Report 0x34 - Buttons + 19 Extension bytes"""
+
     buttons: Buttons
     extension: bytes
 
@@ -240,6 +252,7 @@ class ButtonExt19Report:
 @dataclass(frozen=True)
 class ButtonAccelExt16Report:
     """Report 0x35 - Buttons + Accelerometer + 16 Extension bytes"""
+
     buttons: Buttons
     accel_x: int
     accel_y: int
@@ -250,6 +263,7 @@ class ButtonAccelExt16Report:
 @dataclass(frozen=True)
 class ButtonIR10Ext9Report:
     """Report 0x36 - Buttons + 10 IR bytes + 9 Extension bytes"""
+
     buttons: Buttons
     ir_data: bytes
     extension: bytes
@@ -258,6 +272,7 @@ class ButtonIR10Ext9Report:
 @dataclass(frozen=True)
 class ButtonAccelIR10Ext6Report:
     """Report 0x37 - Buttons + Accelerometer + 10 IR bytes + 6 Extension bytes"""
+
     buttons: Buttons
     accel_x: int
     accel_y: int
@@ -269,12 +284,14 @@ class ButtonAccelIR10Ext6Report:
 @dataclass(frozen=True)
 class Ext21Report:
     """Report 0x3D - Extension Only (21 bytes)"""
+
     extension: bytes
 
 
 @dataclass(frozen=True)
 class ButtonAccelIR36Report:
     """Report 0x3E/0x3F - Buttons + Accelerometer + IR (interleaved, 36 bytes total)"""
+
     buttons: Buttons
     accel_x: int
     accel_y: int
@@ -285,16 +302,26 @@ class ButtonAccelIR36Report:
 
 # Type alias for any input report
 WiimoteReport = (
-    StatusReport | ReadMemoryReport | AckReport | ButtonReport |
-    ButtonAccelReport | ButtonExt8Report | ButtonAccelIR12Report |
-    ButtonExt19Report | ButtonAccelExt16Report | ButtonIR10Ext9Report |
-    ButtonAccelIR10Ext6Report | Ext21Report | ButtonAccelIR36Report
+    StatusReport
+    | ReadMemoryReport
+    | AckReport
+    | ButtonReport
+    | ButtonAccelReport
+    | ButtonExt8Report
+    | ButtonAccelIR12Report
+    | ButtonExt19Report
+    | ButtonAccelExt16Report
+    | ButtonIR10Ext9Report
+    | ButtonAccelIR10Ext6Report
+    | Ext21Report
+    | ButtonAccelIR36Report
 )
 
 
 # ==============================================================================
 # Output Command Encoders
 # ==============================================================================
+
 
 def rumble(enable: bool) -> bytes:
     """
@@ -309,8 +336,14 @@ def rumble(enable: bool) -> bytes:
     return bytes([HID_OUTPUT, WM_CMD_RUMBLE, 0x01 if enable else 0x00])
 
 
-def set_leds(led1: bool = False, led2: bool = False, led3: bool = False,
-             led4: bool = False, *, rumble: bool = False) -> bytes:
+def set_leds(
+    led1: bool = False,
+    led2: bool = False,
+    led3: bool = False,
+    led4: bool = False,
+    *,
+    rumble: bool = False,
+) -> bytes:
     """
     Encode 0x11 - Player LED control command.
 
@@ -338,7 +371,9 @@ def set_leds(led1: bool = False, led2: bool = False, led3: bool = False,
     return bytes([HID_OUTPUT, WM_CMD_LEDS, leds])
 
 
-def set_report_mode(mode: int, *, continuous: bool = True, rumble: bool = False) -> bytes:
+def set_report_mode(
+    mode: int, *, continuous: bool = True, rumble: bool = False
+) -> bytes:
     """
     Encode 0x12 - Data reporting mode command.
 
@@ -406,8 +441,9 @@ def status_request(*, rumble: bool = False) -> bytes:
     return bytes([HID_OUTPUT, WM_CMD_STATUS_REQUEST, flags])
 
 
-def write_memory(address: int, data: bytes, *, register_space: bool = False,
-                 rumble: bool = False) -> bytes:
+def write_memory(
+    address: int, data: bytes, *, register_space: bool = False, rumble: bool = False
+) -> bytes:
     """
     Encode 0x16 - Write memory/register command.
 
@@ -433,11 +469,17 @@ def write_memory(address: int, data: bytes, *, register_space: bool = False,
     addr_bytes = struct.pack(">I", address)[1:]  # Take last 3 bytes
     size = len(data)
 
-    return bytes([HID_OUTPUT, WM_CMD_WRITE_MEMORY, flags]) + addr_bytes + bytes([size]) + data
+    return (
+        bytes([HID_OUTPUT, WM_CMD_WRITE_MEMORY, flags])
+        + addr_bytes
+        + bytes([size])
+        + data
+    )
 
 
-def read_memory(address: int, size: int, *, register_space: bool = False,
-                rumble: bool = False) -> bytes:
+def read_memory(
+    address: int, size: int, *, register_space: bool = False, rumble: bool = False
+) -> bytes:
     """
     Encode 0x17 - Read memory/register command.
 
@@ -480,7 +522,7 @@ def speaker_data(data: bytes, *, rumble: bool = False) -> bytes:
         raise ValueError("Speaker data must be <= 20 bytes")
 
     # Length is stored shifted left by 3 bits
-    length = (len(data) << 3)
+    length = len(data) << 3
     length = _apply_rumble(length, rumble)
 
     # Pad to 20 bytes
@@ -553,15 +595,13 @@ def initialize_ir_camera() -> list[bytes]:
     Returns:
         List of commands to send in sequence
     """
-    return [
-        ir_enable(True),
-        ir_enable_2(True)
-    ]
+    return [ir_enable(True), ir_enable_2(True)]
 
 
 # ==============================================================================
 # Input Report Parsers
 # ==============================================================================
+
 
 def parse_status_report(pkt: bytes) -> Optional[StatusReport]:
     """Parse 0x20 status report: (a1) 20 BB BB LF 00 00 VV"""
@@ -581,7 +621,7 @@ def parse_status_report(pkt: bytes) -> Optional[StatusReport]:
         led2=bool(lf & 0x20),
         led3=bool(lf & 0x40),
         led4=bool(lf & 0x80),
-        battery_level=pkt[7]
+        battery_level=pkt[7],
     )
 
 
@@ -595,14 +635,10 @@ def parse_read_memory_report(pkt: bytes) -> Optional[ReadMemoryReport]:
     size = ((se >> 4) & 0x0F) + 1
     error = bool(se & 0x0F)
     address = u16be(pkt, 5)
-    data = pkt[7:7+size] if not error else b''
+    data = pkt[7 : 7 + size] if not error else b""
 
     return ReadMemoryReport(
-        buttons=buttons,
-        size=size,
-        error=error,
-        address=address,
-        data=data
+        buttons=buttons, size=size, error=error, address=address, data=data
     )
 
 
@@ -612,9 +648,7 @@ def parse_ack_report(pkt: bytes) -> Optional[AckReport]:
         return None
 
     return AckReport(
-        buttons=Buttons(u16be(pkt, 2)),
-        report_id=pkt[4],
-        error_code=pkt[5]
+        buttons=Buttons(u16be(pkt, 2)), report_id=pkt[4], error_code=pkt[5]
     )
 
 
@@ -632,10 +666,7 @@ def parse_button_accel_report(pkt: bytes) -> Optional[ButtonAccelReport]:
         return None
 
     return ButtonAccelReport(
-        buttons=Buttons(u16be(pkt, 2)),
-        accel_x=pkt[4],
-        accel_y=pkt[5],
-        accel_z=pkt[6]
+        buttons=Buttons(u16be(pkt, 2)), accel_x=pkt[4], accel_y=pkt[5], accel_z=pkt[6]
     )
 
 
@@ -644,10 +675,7 @@ def parse_button_ext8_report(pkt: bytes) -> Optional[ButtonExt8Report]:
     if len(pkt) < 12 or pkt[0] != HID_INPUT or pkt[1] != WM_RPT_BTN_EXT8:
         return None
 
-    return ButtonExt8Report(
-        buttons=Buttons(u16be(pkt, 2)),
-        extension=pkt[4:12]
-    )
+    return ButtonExt8Report(buttons=Buttons(u16be(pkt, 2)), extension=pkt[4:12])
 
 
 def parse_button_accel_ir12_report(pkt: bytes) -> Optional[ButtonAccelIR12Report]:
@@ -660,7 +688,7 @@ def parse_button_accel_ir12_report(pkt: bytes) -> Optional[ButtonAccelIR12Report
         accel_x=pkt[4],
         accel_y=pkt[5],
         accel_z=pkt[6],
-        ir_data=pkt[7:19]
+        ir_data=pkt[7:19],
     )
 
 
@@ -669,10 +697,7 @@ def parse_button_ext19_report(pkt: bytes) -> Optional[ButtonExt19Report]:
     if len(pkt) < 23 or pkt[0] != HID_INPUT or pkt[1] != WM_RPT_BTN_EXT19:
         return None
 
-    return ButtonExt19Report(
-        buttons=Buttons(u16be(pkt, 2)),
-        extension=pkt[4:23]
-    )
+    return ButtonExt19Report(buttons=Buttons(u16be(pkt, 2)), extension=pkt[4:23])
 
 
 def parse_button_accel_ext16_report(pkt: bytes) -> Optional[ButtonAccelExt16Report]:
@@ -685,7 +710,7 @@ def parse_button_accel_ext16_report(pkt: bytes) -> Optional[ButtonAccelExt16Repo
         accel_x=pkt[4],
         accel_y=pkt[5],
         accel_z=pkt[6],
-        extension=pkt[7:23]
+        extension=pkt[7:23],
     )
 
 
@@ -695,13 +720,13 @@ def parse_button_ir10_ext9_report(pkt: bytes) -> Optional[ButtonIR10Ext9Report]:
         return None
 
     return ButtonIR10Ext9Report(
-        buttons=Buttons(u16be(pkt, 2)),
-        ir_data=pkt[4:14],
-        extension=pkt[14:23]
+        buttons=Buttons(u16be(pkt, 2)), ir_data=pkt[4:14], extension=pkt[14:23]
     )
 
 
-def parse_button_accel_ir10_ext6_report(pkt: bytes) -> Optional[ButtonAccelIR10Ext6Report]:
+def parse_button_accel_ir10_ext6_report(
+    pkt: bytes,
+) -> Optional[ButtonAccelIR10Ext6Report]:
     """Parse 0x37 button+accel+IR(10)+extension(6) report: (a1) 37 BB BB AA AA AA II... EE..."""
     if len(pkt) < 23 or pkt[0] != HID_INPUT or pkt[1] != WM_RPT_BTN_ACC_IR10_EXT6:
         return None
@@ -712,7 +737,7 @@ def parse_button_accel_ir10_ext6_report(pkt: bytes) -> Optional[ButtonAccelIR10E
         accel_y=pkt[5],
         accel_z=pkt[6],
         ir_data=pkt[7:17],
-        extension=pkt[17:23]
+        extension=pkt[17:23],
     )
 
 
@@ -726,7 +751,11 @@ def parse_ext21_report(pkt: bytes) -> Optional[Ext21Report]:
 
 def parse_button_accel_ir36_report(pkt: bytes) -> Optional[ButtonAccelIR36Report]:
     """Parse 0x3E/0x3F interleaved button+accel+IR(36) report: (a1) 3E/3F BB BB AA AA AA II..."""
-    if len(pkt) < 23 or pkt[0] != HID_INPUT or pkt[1] not in (WM_RPT_BTN_ACC_IR36_1, WM_RPT_BTN_ACC_IR36_2):
+    if (
+        len(pkt) < 23
+        or pkt[0] != HID_INPUT
+        or pkt[1] not in (WM_RPT_BTN_ACC_IR36_1, WM_RPT_BTN_ACC_IR36_2)
+    ):
         return None
 
     part = 1 if pkt[1] == WM_RPT_BTN_ACC_IR36_1 else 2
@@ -737,7 +766,7 @@ def parse_button_accel_ir36_report(pkt: bytes) -> Optional[ButtonAccelIR36Report
         accel_y=pkt[5],
         accel_z=pkt[6],
         ir_data=pkt[7:25] if len(pkt) >= 25 else pkt[7:],
-        part=part
+        part=part,
     )
 
 

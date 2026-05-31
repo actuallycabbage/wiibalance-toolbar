@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
-from typing import Optional, Callable, Any
 from enum import IntEnum
+from typing import Callable, Optional
 
 from . import reports
-from .transport import BluetoothConnection, L2CAPChannel, PSM
+from .transport import BluetoothConnection, L2CAPChannel
 
 
 @dataclass
@@ -88,6 +89,61 @@ class Wiimote:
         # Connected state
         self._connected = False
 
+        # heartbeat task
+        self._heartbeat_task: Optional[asyncio.Task] = None
+
+    # Connection management
+
+    async def connect(self) -> None:
+        """
+        Connect to the Wiimote and set up L2CAP channels.
+
+        Must be called before using the Wiimote.
+        """
+        if self._connected:
+            return
+
+        channels = await self._connection.get_channels()
+
+        self._control_channel = channels.control
+        self._interrupt_channel = channels.interrupt
+
+        # Set up interrupt channel to receive reports
+        self._interrupt_channel.sink = self._handle_report
+
+        self._heartbeat_task = asyncio.create_task(self._heartbeat())
+
+        self._connected = True
+
+    async def _heartbeat(self):
+        """Request status every couple seconds"""
+        # TODO: set a timeout to detect if the wiimote connection dropped
+        # before bumble notices.
+        while True:
+            await asyncio.sleep(2)
+            await self.request_status(rumble=False)
+
+    async def disconnect(self) -> None:
+        """Disconnect from the Wiimote"""
+        if not self._connected:
+            return
+
+        if self._heartbeat_task:
+            self._heartbeat_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._heartbeat_task
+
+        await self._connection.disconnect()
+        self._control_channel = None
+        self._interrupt_channel = None
+        self._connected = False
+
+    @property
+    def address(self) -> str:
+        return self._connection.peer_address
+
+    # State props
+
     @property
     def state(self) -> WiimoteState:
         """Get the current Wiimote state (read-only copy)"""
@@ -152,42 +208,6 @@ class Wiimote:
     def on_extension_data(self, callback: Callable[[bytes], None]) -> None:
         """Set callback for extension controller data"""
         self._on_extension_data = callback
-
-    # Connection management
-
-    async def connect(self) -> None:
-        """
-        Connect to the Wiimote and set up L2CAP channels.
-
-        Must be called before using the Wiimote.
-        """
-        if self._connected:
-            return
-
-        # Create HID control channel (PSM 0x11)
-        self._control_channel = await self._connection.create_l2cap_channel(
-            PSM.HID_CONTROL
-        )
-
-        # Create HID interrupt channel (PSM 0x13)
-        self._interrupt_channel = await self._connection.create_l2cap_channel(
-            PSM.HID_INTERRUPT
-        )
-
-        # Set up interrupt channel to receive reports
-        self._interrupt_channel.sink = self._handle_report
-
-        self._connected = True
-
-    async def disconnect(self) -> None:
-        """Disconnect from the Wiimote"""
-        if not self._connected:
-            return
-
-        await self._connection.disconnect()
-        self._control_channel = None
-        self._interrupt_channel = None
-        self._connected = False
 
     # Report handling
 
