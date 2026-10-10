@@ -123,3 +123,11 @@ def _pin_from_address(addr: str) -> bytes:
     ref: https://wiibrew.org/wiki/Wiimote#Bluetooth_Pairing
     """
     return _addr_bytes(addr)[::-1]  # 6 bytes, reversed
+
+
+class WiimoteDiscoveryListener(Device.Listener):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def on_inquiry_result(self, address, class_of_device, data, rssi):
+        return super().on_inquiry_result(address, class_of_device, data, rssi)

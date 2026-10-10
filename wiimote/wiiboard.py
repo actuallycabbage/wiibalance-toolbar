@@ -4,26 +4,40 @@
 from __future__ import annotations
 
 import asyncio
+import enum
+import logging
 import struct
+import sys
 import zlib
-from dataclasses import dataclass, field
-from typing import Callable, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Optional, Tuple
 
 from . import reports
-from .wiimote import ReportMode, Wiimote, WiimoteState
+from .wiimote import ReportMode, Wiimote
+
+logger = logging.getLogger(__name__)
+
+
+class SensorIndex(enum.IntEnum):
+    TopRight = 0
+    BottomRight = 1
+    TopLeft = 2
+    BottomLeft = 3
 
 
 @dataclass
 class CalibrationData:
     """Calibration data for Wii Balance Board sensors"""
 
-    sensor_0kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 0kg
-    sensor_17kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 17kg
-    sensor_34kg: Tuple[int, int, int, int]  # TR, BR, TL, BL at 34kg
+    # Top Right (TR), Bottom Right (BR), Top Left (TL), Bottom Left (BL)
+    sensor_0kg: Tuple[int, int, int, int]
+    sensor_17kg: Tuple[int, int, int, int]
+    sensor_34kg: Tuple[int, int, int, int]
     reference_temperature: int  # Reference temperature for compensation
     reference_battery: int = 0x69  # Reference battery level (usually 0x69)
 
-    def get_calibration(self, sensor_idx: int) -> Tuple[int, int, int]:
+    # todo: need a TARE feature
+    def get_calibration(self, sensor_idx: SensorIndex) -> Tuple[int, int, int]:
         """Get calibration values for a specific sensor (0-3)
 
         Args:
@@ -43,37 +57,40 @@ class CalibrationData:
 class BalanceBoardState:
     """Current state of the Balance Board"""
 
-    raw_tr: int = 0  # Top Right raw value
-    raw_br: int = 0  # Bottom Right raw value
-    raw_tl: int = 0  # Top Left raw value
-    raw_bl: int = 0  # Bottom Left raw value
+    raw_tr: int = 0
+    raw_br: int = 0
+    raw_tl: int = 0
+    raw_bl: int = 0
 
-    temperature: int = 0  # Temperature reading
-    battery_level: int = 0  # Battery level (0-255)
+    temperature: int = 0  # in C
+    battery_level: int = 0  # 0-255
 
-    weight_tr: float = 0.0  # Top Right weight in kg
-    weight_br: float = 0.0  # Bottom Right weight in kg
-    weight_tl: float = 0.0  # Top Left weight in kg
-    weight_bl: float = 0.0  # Bottom Left weight in kg
+    # in kg
+    weight_tr: float = 0.0
+    weight_br: float = 0.0
+    weight_tl: float = 0.0
+    weight_bl: float = 0.0
 
-    total_weight: float = 0.0  # Total weight in kg
+    # in kg
+    total_weight: float = 0.0
+
+    # -100 to 100
     cob_x: float = 0.0  # Center of balance X coordinate
     cob_y: float = 0.0  # Center of balance Y coordinate
 
 
 class WiiBoard(Wiimote):
     """
-    Wii Balance Board controller extending Wiimote.
+    Wii Balance Board controller.
 
-    Provides functionality to read weight data from the Balance Board's
-    four pressure sensors and read calibration data from the EEPROM.
+    The WiiBoard is an extension of the WiiMote with pressure sensor data
+    available in the EXT8 report.
     """
 
+    # caliration constants
     CALIBRATION_START_ADDR = 0xA40020
     CALIBRATION_END_ADDR = 0xA4003F
     REFERENCE_TEMP_ADDR = 0xA40060
-    EXTENSION_INIT_ADDR_1 = 0xF0
-    EXTENSION_INIT_ADDR_2 = 0xFB
 
     def __init__(self, connection):
         """
@@ -91,6 +108,13 @@ class WiiBoard(Wiimote):
         # Calibration data reassembly buffers
         self._calibration_buffer: bytearray = bytearray()
         self._expected_calibration_size = 0
+        self._calibration_bytes: bytes = bytes()
+        self._calibration_ready = asyncio.Event()
+        self._calibration_error: Optional[str] = None
+        self._initialisation_read: Optional[tuple[int, asyncio.Future]] = None
+        self._sensors_all_zero: Optional[bool] = None
+        self._last_status_battery: Optional[tuple[int, bool]] = None
+        self._last_battery_bars: Optional[int] = None
 
         # Balance Board specific callbacks
         self._on_weight_change: Optional[Callable[[BalanceBoardState], None]] = None
@@ -99,9 +123,10 @@ class WiiBoard(Wiimote):
             None
         )
         self._on_calibration_loaded: Optional[Callable[[CalibrationData], None]] = None
+        self._on_balance_report: Optional[Callable[[BalanceBoardState], None]] = None
 
         # Override extension data callback for weight parsing
-        self.on_extension_data(self._handle_extension_data)
+        super().on_extension_data(self._handle_extension_data)
 
     # Properties
 
@@ -140,16 +165,31 @@ class WiiBoard(Wiimote):
         """Get battery level (0-255)"""
         return self._bb_state.battery_level
 
+    @property
+    def battery_bars(self) -> int:
+        # WiiBrew documents bars for the extension battery byte, not a linear
+        # percentage. These thresholds do not apply to the separate status byte.
+        return sum(self.battery_level >= threshold for threshold in (0x6A, 0x78, 0x7D, 0x82))
+
     # Event callbacks
+
+    def on_extension_data(self, callback: Any):
+        """Internal use only"""
+        pass
 
     def on_weight_change(self, callback: Callable[[BalanceBoardState], None]) -> None:
         """Set callback for weight changes"""
         self._on_weight_change = callback
 
+    def on_balance_report(self, callback: Callable[[BalanceBoardState], None]) -> None:
+        """Receive each calibrated report, even when balance has not changed."""
+        self._on_balance_report = callback
+
     def on_temperature_change(self, callback: Callable[[int], None]) -> None:
         """Set callback for temperature changes"""
         self._on_temperature_change = callback
 
+    # todo: this changes so rapidly may as well not even try check for changes and just toss it down the wire.
     def on_center_of_balance_change(
         self, callback: Callable[[float, float], None]
     ) -> None:
@@ -177,37 +217,58 @@ class WiiBoard(Wiimote):
         raw_tl = struct.unpack_from(">H", data, 4)[0]
         raw_bl = struct.unpack_from(">H", data, 6)[0]
 
+        all_zero = not any((raw_tr, raw_br, raw_tl, raw_bl))
+        # A live Bluetooth stream can contain only zero sensor words. Log state
+        # transitions, not every packet, to distinguish that from lost reporting.
+        if all_zero != self._sensors_all_zero:
+            print(
+                f"[sensors] raw TR/BR/TL/BL={raw_tr}/{raw_br}/{raw_tl}/{raw_bl} "
+                f"all_zero={all_zero} extension={data.hex(' ')}",
+                file=sys.stderr,
+                flush=True,
+            )
+            self._sensors_all_zero = all_zero
+
         self._bb_state.raw_tr = raw_tr
         self._bb_state.raw_br = raw_br
         self._bb_state.raw_tl = raw_tl
         self._bb_state.raw_bl = raw_bl
 
-        # Parse temperature and battery if available (report 0x34)
+        # temperature and battery if available (report 0x34)
         if len(data) >= 11:
             self._bb_state.temperature = data[8]
             self._bb_state.battery_level = data[10]
+            bars = self.battery_bars
+            if bars != self._last_battery_bars:
+                print(
+                    f"[battery] Extension raw=0x{self.battery_level:02X} bars={bars}/4 "
+                    f"temperature_raw=0x{self.temperature:02X}",
+                    file=sys.stderr, flush=True,
+                )
+                self._last_battery_bars = bars
 
-        # Calculate weights if calibration is available
+        # calculate weight data (takes calibration into account)
         if self._calibration:
             self._calculate_weights()
 
-        # Trigger callbacks
+        # callbacks
         self._trigger_weight_callbacks()
+        if self._calibration and self._on_balance_report:
+            self._on_balance_report(self._bb_state)
 
     def _calculate_weights(self, compensate_temperature: bool = False) -> None:
         """Calculate weights from raw sensor readings"""
-        # Calculate individual sensor weights
         self._bb_state.weight_tr = self.calculate_sensor_weight(
-            self._bb_state.raw_tr, 0
+            self._bb_state.raw_tr, SensorIndex.TopRight
         )
         self._bb_state.weight_br = self.calculate_sensor_weight(
-            self._bb_state.raw_br, 1
+            self._bb_state.raw_br, SensorIndex.BottomRight
         )
         self._bb_state.weight_tl = self.calculate_sensor_weight(
-            self._bb_state.raw_tl, 2
+            self._bb_state.raw_tl, SensorIndex.TopLeft
         )
         self._bb_state.weight_bl = self.calculate_sensor_weight(
-            self._bb_state.raw_bl, 3
+            self._bb_state.raw_bl, SensorIndex.BottomLeft
         )
 
         # Calculate total weight
@@ -296,13 +357,12 @@ class WiiBoard(Wiimote):
 
     # Weight calculation methods
 
-    def calculate_sensor_weight(self, reading: int, sensor_idx: int) -> float:
+    def calculate_sensor_weight(self, reading: int, sensor_idx: SensorIndex) -> float:
         """
         Calculate weight for a single sensor using calibration data.
 
         Args:
             reading: Raw sensor reading
-            sensor_idx: Sensor index (0=TR, 1=BR, 2=TL, 3=BL)
 
         Returns:
             Calculated weight in kg
@@ -312,32 +372,30 @@ class WiiBoard(Wiimote):
 
         cal_0kg, cal_17kg, cal_34kg = self._calibration.get_calibration(sensor_idx)
 
-        # Interpolate based on calibration values
+        # as per Wiibrew.org doc:
+
+        # Calculating the weight on each sensor simply involves interpolating
+        # between the two calibration values your reading falls between (or
+        # using the higher two values if your reading exceeds the highest
+        # calibration value), and the total weight on the board is the sum of
+        # these values.
+
+        def lerp(x, x0, x1, y0, y1):
+            return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+        # lerp on calibration values
         if reading <= cal_0kg:
-            # Below or at 0kg
             return 0.0
+
         elif reading <= cal_17kg:
-            # Between 0kg and 17kg
-            return 17.0 * (reading - cal_0kg) / (cal_17kg - cal_0kg)
+            return lerp(reading, cal_0kg, cal_17kg, 0.0, 17.0)
+
         elif reading <= cal_34kg:
-            # Between 17kg and 34kg
-            return 17.0 + 17.0 * (reading - cal_17kg) / (cal_34kg - cal_17kg)
+            return lerp(reading, cal_17kg, cal_34kg, 17.0, 34.0)
+
         else:
-            # Above 34kg - extrapolate
-            return 34.0 + 34.0 * (reading - cal_34kg) / (cal_34kg - cal_17kg)
-
-    def get_center_of_balance(self) -> Tuple[float, float]:
-        """
-        Get the center of balance coordinates.
-
-        Returns:
-            Tuple of (x, y) coordinates as percentage offsets from center
-            X: Positive = right, Negative = left
-            Y: Positive = top, Negative = bottom
-        """
-        return self.center_of_balance
-
-    # Calibration reading methods
+            # extrapolate
+            return lerp(reading, cal_17kg, cal_34kg, 17.0, 34.0)
 
     async def initialize(self, player: int = 1) -> None:
         """
@@ -366,20 +424,69 @@ class WiiBoard(Wiimote):
         await self.read_calibration_data()
         await asyncio.sleep(0.15)
 
-        # Set report mode to include extension data (8 bytes)
-        await self.set_report_mode(ReportMode.BUTTONS_EXT8)
+        # 0x34 carries weight, temperature and battery; 0x32 stops after weight.
+        await self.set_report_mode(ReportMode.BUTTONS_EXT19)
 
     async def _initialize_extension(self) -> None:
         """Initialize the Balance Board extension controller"""
-        # Write initialization sequence
-        await self.write_memory(
-            self.EXTENSION_INIT_ADDR_1, bytes([0x55]), register_space=True
-        )
+        self._expected_calibration_size = 0
+        # WiiBrew's F0/FB offsets are relative to 0xA40000. The packet
+        # encoder sends addresses verbatim; register_space only selects the bus.
+        # https://wiibrew.org/wiki/Wii_Balance_Board#Wii_Initialisation_Sequence
+        await self.write_memory(0xA400F0, bytes([0x55]), register_space=True)
+        print("[init] WiiBoard: acknowledged register write 0xA400F0 <- 55", file=sys.stderr, flush=True)
+
         await asyncio.sleep(0.01)
 
-        await self.write_memory(
-            self.EXTENSION_INIT_ADDR_2, bytes([0x00]), register_space=True
-        )
+        await self.write_memory(0xA400FB, bytes([0x00]), register_space=True)
+        print("[init] WiiBoard: acknowledged register write 0xA400FB <- 00", file=sys.stderr, flush=True)
+
+        # WiiBrew reports that this observed Wii sequence revives disabled sensors.
+        # F1's purpose is unknown. Its PC workaround explicitly omits F0 <- AA
+        # (encryption enable), but retains the example key-register writes below.
+        # Reads in the trace are 16 bytes. Wait durations are undocumented: use
+        # 50 ms between steps and 100 ms at its two explicit settling waits.
+        print("[init] WiiBoard: starting extended sensor workaround (encryption disabled)", file=sys.stderr, flush=True)
+        await self._read_initialisation_register(0xA400FA)
+        await asyncio.sleep(0.05)
+        for offset, data in (
+            (0x40, bytes.fromhex("ab 7c b4 1e 97 8d")),
+            (0x46, bytes.fromhex("9e 7e 81 1b 99 29")),
+            (0x4C, bytes.fromhex("17 07 a6 1e")),
+            (0xF1, b"\xaa"),
+            (0xF1, b"\xaa"),
+            (0xF1, b"\xaa"),
+        ):
+            await self.write_memory(0xA40000 + offset, data, register_space=True)
+            await asyncio.sleep(0.05)
+
+        for offset in (0x20, 0x30):
+            await self._read_initialisation_register(0xA40000 + offset)
+            await asyncio.sleep(0.05)
+
+        for data in (bytes.fromhex("aa aa aa 55 aa aa aa"), b"\xaa", b"\xaa"):
+            await self.write_memory(0xA400F1, data, register_space=True)
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
+        await self.write_memory(0xA400F1, b"\xaa", register_space=True)
+
+        for offset in (0x24, 0x34, 0x3C, 0x60, 0x21, 0x20, 0x24):
+            await self._read_initialisation_register(0xA40000 + offset)
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
+        await self.write_memory(0xA400F1, b"\xaa", register_space=True)
+        print("[init] WiiBoard: extended writes acknowledged; reading fresh calibration next", file=sys.stderr, flush=True)
+
+    async def _read_initialisation_register(self, address: int) -> None:
+        # Wait for each read response so a delayed workaround response cannot be
+        # mistaken for a chunk of the subsequent authoritative calibration read.
+        response = asyncio.get_running_loop().create_future()
+        self._initialisation_read = (address & 0xFFFF, response)
+        try:
+            await self.read_memory(address, 16, register_space=True)
+            await asyncio.wait_for(response, 3)
+        finally:
+            self._initialisation_read = None
 
     async def read_calibration_data(self) -> None:
         """
@@ -392,6 +499,8 @@ class WiiBoard(Wiimote):
         Verifies CRC32 checksum before storing the data.
         """
         # Clear any existing calibration buffer
+        self._calibration_ready.clear()
+        self._calibration_error = None
         self._calibration_buffer.clear()
         self._expected_calibration_size = (
             self.CALIBRATION_END_ADDR - self.CALIBRATION_START_ADDR + 1
@@ -408,11 +517,21 @@ class WiiBoard(Wiimote):
 
         # Read reference temperature
         await self.read_memory(self.REFERENCE_TEMP_ADDR, 2, register_space=True)
-
-        # Note: The actual data will be received via ReadMemoryReport
-        # We'll handle it in _handle_read_memory_report if we override it
+        await asyncio.wait_for(self._calibration_ready.wait(), 3)
+        if self._calibration_error:
+            raise RuntimeError(self._calibration_error)
 
     # Report handling overrides
+
+    def _handle_status_report(self, report: reports.StatusReport) -> None:
+        super()._handle_status_report(report)
+        battery = (report.battery_level, report.battery_low)
+        if battery != self._last_status_battery:
+            print(
+                f"[battery] Status raw=0x{report.battery_level:02X} low={report.battery_low}",
+                file=sys.stderr, flush=True,
+            )
+            self._last_status_battery = battery
 
     def _handle_report(self, data: bytes) -> None:
         """Handle incoming report from Balance Board"""
@@ -431,6 +550,18 @@ class WiiBoard(Wiimote):
 
     def _handle_read_memory_report(self, report: reports.ReadMemoryReport) -> None:
         """Handle read memory report for calibration data"""
+        if self._initialisation_read:
+            address, response = self._initialisation_read
+            if report.address == address and not response.done():
+                if report.error or len(report.data) != 16:
+                    response.set_exception(RuntimeError(f"Initialisation read 0xA4{address:04X} failed"))
+                else:
+                    response.set_result(None)
+            return
+        # The workaround also reads these registers, before the authoritative
+        # calibration request. Do not assemble its overlapping reads as calibration.
+        if not self._expected_calibration_size:
+            return
         # For register space reads, address field contains offset within requested range
         # Our 32-byte read at 0xa40020 returns two 16-byte chunks at offsets 0x0020 and 0x0030
         cal_offset_1 = self.CALIBRATION_START_ADDR & 0xFFFF  # 0x0020
@@ -477,89 +608,69 @@ class WiiBoard(Wiimote):
 
         reference_battery = data[1]
 
-        # Store calibration data (reference temperature will be set separately)
         self._calibration = CalibrationData(
             sensor_0kg=sensor_0kg,
             sensor_17kg=sensor_17kg,
             sensor_34kg=sensor_34kg,
-            reference_temperature=0,
+            reference_temperature=0,  # reference_temperature comes in in another report
             reference_battery=reference_battery,
         )
 
-        # Store calibration data for checksum verification (will be completed when we read reference temp)
-        self._cal_data_for_checksum = data  # Store the 32 bytes
+        # checksum verification comes in later when the full report is read
+        self._calibration_bytes = data
 
     def _process_reference_temperature(self, data: bytes) -> None:
         """Process reference temperature from EEPROM"""
-        if self._calibration:
-            self._calibration.reference_temperature = data[0]
 
-            # Verify checksum with reference temperature
-            if hasattr(self, "_cal_data_for_checksum"):
-                cal_data = self._cal_data_for_checksum
+        if not self._calibration:
+            return None
 
-                # Extract data for checksum calculation (28 bytes total):
-                # bytes 0x24-0x3b (24 bytes) + bytes 0x20-0x21 (2 bytes) + bytes 0x60-0x61 (2 bytes)
-                cal_24_3b = cal_data[4:28]  # 0x24-0x3b
-                cal_20_21 = cal_data[0:2]  # 0x20-0x21
-                cal_60_61 = data[0:2]  # 0x60-0x61
+        if len(self._calibration_bytes) <= 0:
+            return None
 
-                checksum_input = cal_24_3b + cal_20_21 + cal_60_61
+        self._calibration.reference_temperature = data[0]
 
-                # Calculate CRC32
-                calculated_crc = zlib.crc32(checksum_input) & 0xFFFFFFFF
+        # validate crc
+        if not self._validate_calibration_checksum(self._calibration_bytes, data):
+            self._calibration_error = "Calibration CRC check failed"
+        self._calibration_ready.set()
+        if self._calibration_error:
+            return
 
-                # Extract stored checksum (last 4 bytes of calibration data)
-                stored_crc = struct.unpack(">I", cal_data[28:32])[0]
+        # callback
+        if self._on_calibration_loaded:
+            self._on_calibration_loaded(self._calibration)
 
-                # Verify and report
-                # if calculated_crc == stored_crc:
-                #     print(f"Calibration data verified!")
-                #     print(f"  Temperature: {data[0]}")
-                #     print(f"  Battery: {self._calibration.reference_battery}")
-                #     print(
-                #         f"  0kg: TR={self._calibration.sensor_0kg[0]}, BR={self._calibration.sensor_0kg[1]}, TL={self._calibration.sensor_0kg[2]}, BL={self._calibration.sensor_0kg[3]}"
-                #     )
-                #     print(
-                #         f"  17kg: TR={self._calibration.sensor_17kg[0]}, BR={self._calibration.sensor_17kg[1]}, TL={self._calibration.sensor_17kg[2]}, BL={self._calibration.sensor_17kg[3]}"
-                #     )
-                #     print(
-                #         f"  34kg: TR={self._calibration.sensor_34kg[0]}, BR={self._calibration.sensor_34kg[1]}, TL={self._calibration.sensor_34kg[2]}, BL={self._calibration.sensor_34kg[3]}"
-                #     )
-                # else:
-                #     print(f"Warning: Calibration data checksum verification failed")
-                #     print(
-                #         f"  Calculated: 0x{calculated_crc:08x}, Stored: 0x{stored_crc:08x}"
-                #     )
-
-                delattr(self, "_cal_data_for_checksum")
-
-            # Trigger calibration loaded callback
-            if self._on_calibration_loaded:
-                self._on_calibration_loaded(self._calibration)
-
-    # Convenience methods
-
-    async def get_total_weight(self, compensate_temperature: bool = False) -> float:
+    def _validate_calibration_checksum(
+        self, calibration_bytes: bytes, reference_temperature_bytes: bytes
+    ):
         """
-        Get current total weight in kg.
-
         Args:
-            compensate_temperature: Whether to apply temperature compensation
-
-        Returns:
-            Total weight in kg
+            calibration_bytes: [0x20, 0x3f]
+            reference_temperature_bytes: [0x60, 0x61]
         """
-        if compensate_temperature:
-            self._calculate_weights(compensate_temperature=True)
 
-        return self.total_weight
+        cal_data = calibration_bytes
 
-    async def get_sensor_weights(self) -> dict[str, float]:
-        """
-        Get individual sensor weights.
+        # Extract data for checksum calculation (28 bytes total):
+        # bytes 0x24-0x3b (24 bytes) + bytes 0x20-0x21 (2 bytes) + bytes 0x60-0x61 (2 bytes)
 
-        Returns:
-            Dictionary mapping sensor names to weights in kg
-        """
-        return self.sensor_weights
+        cal_24_3b = cal_data[4:28]  # 0x24-0x3b
+        cal_20_21 = cal_data[0:2]  # 0x20-0x21
+        cal_60_61 = reference_temperature_bytes[0:2]  # 0x60-0x61
+
+        checksum_input = cal_24_3b + cal_20_21 + cal_60_61
+
+        calculated_crc = zlib.crc32(checksum_input) & 0xFFFFFFFF
+
+        board_crc = struct.unpack(">I", cal_data[28:32])[0]
+
+        if calculated_crc != board_crc:
+            logger.warning(
+                "Calibration check failure. Calculated %s Expected %s",
+                calculated_crc,
+                board_crc,
+            )
+            return False
+
+        return True

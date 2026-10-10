@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Callable, Optional
@@ -91,6 +92,8 @@ class Wiimote:
 
         # heartbeat task
         self._heartbeat_task: Optional[asyncio.Task] = None
+        self._write_lock = asyncio.Lock()
+        self._write_ack: Optional[asyncio.Future] = None
 
     # Connection management
 
@@ -348,7 +351,17 @@ class Wiimote:
         """Handle acknowledgment report (0x22)"""
         # Update button state from ack
         self._state.buttons = report.buttons
-        # TODO: Handle errors in report.error_code
+        # ACKs identify the output report, not the register address. Keep the raw
+        # error code so failed initialisation writes can be correlated with send logs.
+        print(
+            f"[ack] {type(self).__name__}: command=0x{report.report_id:02X} "
+            f"error=0x{report.error_code:02X} "
+            f"({'success' if report.error_code == 0 else 'failure'})",
+            file=sys.stderr,
+            flush=True,
+        )
+        if report.report_id == reports.WM_CMD_WRITE_MEMORY and self._write_ack and not self._write_ack.done():
+            self._write_ack.set_result(report.error_code)
 
     # Command methods
 
@@ -481,7 +494,17 @@ class Wiimote:
         payload = reports.write_memory(
             address, data, register_space=register_space, rumble=rumble
         )
-        self._send_command(payload)
+        # ACKs identify only command 0x16, not the address, so writes must be serial.
+        # A failed/timed-out initialisation must not announce a connected board.
+        async with self._write_lock:
+            self._write_ack = asyncio.get_running_loop().create_future()
+            try:
+                self._send_command(payload)
+                error = await asyncio.wait_for(self._write_ack, 3)
+                if error:
+                    raise RuntimeError(f"Register write 0x{address:06X} failed: ACK 0x{error:02X}")
+            finally:
+                self._write_ack = None
 
     # Convenience methods
 

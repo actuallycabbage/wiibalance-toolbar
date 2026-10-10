@@ -469,11 +469,13 @@ def write_memory(
     addr_bytes = struct.pack(">I", address)[1:]  # Take last 3 bytes
     size = len(data)
 
+    # Report 0x16 requires a fixed 16-byte data field, even for a one-byte write.
+    # The size byte is the actual write length; padding is not written to registers.
     return (
         bytes([HID_OUTPUT, WM_CMD_WRITE_MEMORY, flags])
         + addr_bytes
         + bytes([size])
-        + data
+        + data.ljust(16, b"\x00")
     )
 
 

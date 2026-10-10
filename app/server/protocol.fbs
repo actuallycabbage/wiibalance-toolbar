@@ -1,0 +1,51 @@
+namespace WiimoteServer;
+
+enum Button : ubyte {
+  NONE = 0,
+
+  A,
+  B,
+  ONE,
+  TWO,
+
+  PLUS,
+  MINUS,
+  HOME,
+
+  UP,
+  DOWN,
+  LEFT,
+  RIGHT,
+}
+
+table PressedButtons {
+    pressed: [Button];
+}
+
+table BalanceFrame {
+    x: float32;
+    y: float32;
+}
+
+table ButtonFrame {
+    wiimote_idx: uint;
+    buttons: [Button];
+}
+
+union ServerMessage {
+    BalanceFrame,
+    ButtonFrame
+}
+
+table ServerEnvelope {
+    // TODO: server timestamp
+    message: ServerMessage;
+}
+
+// Commands
+
+union ServerCommand {
+}
+
+table ServerCommandEnvelope {
+}

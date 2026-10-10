@@ -115,7 +115,7 @@ class WiiBalanceToolbarApp(rumps.App):
 
         self.board = mote
 
-        # mote.on_center_of_balance_change(lambda x, y: self._on_cob_change((x,y)))
+        mote.on_center_of_balance_change(lambda x, y: self._on_cob_change((x,y)))
 
     def _on_cob_change(self, cob: Tuple[float, float]):
         if cob == (-100, 100):

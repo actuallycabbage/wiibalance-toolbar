@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="135" viewBox="0 40 360 135">
+  <!-- Parallel projection, approximately 15 degrees above the front edge. -->
+  <g fill="none" stroke="#87939f" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M20 100 74 61 337 86 283 125Z"/>
+    <path d="M20 100v12l263 25 54-39V86M283 125v12"/>
+    <path d="m46 97 40-29 102 9-41 30Z" stroke-width="1.1"/>
+    <path d="m168 109 41-30 103 10-41 29Z" stroke-width="1.1"/>
+    <path d="m154 107 41-30" stroke-width="1" stroke-dasharray="3 4"/>
+    <path d="m37 114 2 5 23 2 2-5m181 18 2 5 22 2 3-5"/>
+  </g>
+  <g fill="none" stroke="#2188ff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+    <path d="m142 116 27 3v6l-27-3Z"/>
+    <ellipse cx="155" cy="120" rx="24" ry="14" stroke-width="1.3" stroke-dasharray="3 4"/>
+    <path d="M155 166v-25m-5 6 5-6 5 6"/>
+  </g>
+</svg>
